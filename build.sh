@@ -72,12 +72,34 @@ pack_dtbo_img(){
         return 1
     fi
 
-    python3 scripts/mkdtboimg.py create \
-        --dtbo-dir "$OUT/arch/arm64/boot/dts/vendor/qcom" \
-        --dts-dir arch/arm64/boot/dts/vendor/qcom \
-        --makefile arch/arm64/boot/dts/vendor/qcom/Makefile \
-        --platform LITO \
-        --out "$OUT/arch/arm64/boot/dtbo.img";
+    local dts_makefile=arch/arm64/boot/dts/vendor/qcom/Makefile
+    local dtbo_dir="$OUT/arch/arm64/boot/dts/vendor/qcom"
+    local dtbo_img="$OUT/arch/arm64/boot/dtbo.img"
+    local dtbos=() name
+
+    # Only pack overlays enabled for this platform. A plain "find *.dtbo"
+    # would also pick up stale overlays left by previously enabled platforms
+    # (e.g. lagoon) and produce a wrong image.
+    while read -r name; do
+        [ -n "$name" ] || continue
+        if [ -f "$dtbo_dir/$name" ]; then
+            dtbos+=("$dtbo_dir/$name")
+        else
+            echo " Warning: compiled overlay $name not found, skipped"
+        fi
+    done < <(sed -n '/^dtbo-\$(CONFIG_ARCH_LITO)/,/^$/p' "$dts_makefile" \
+             | grep -oE '[A-Za-z0-9_.-]+\.dtbo' | sort -u)
+
+    if [ "${#dtbos[@]}" -eq 0 ]; then
+        echo "Error: no compiled LITO *.dtbo found under $dtbo_dir"
+        return 1
+    fi
+
+    # Same invocation as the upstream EndCredits tree (cmd_mkdtimg):
+    # official AOSP mkdtboimg.py create --page_size=4096, id/rev/custom = 0.
+    python3 scripts/mkdtboimg.py create "$dtbo_img" \
+        --page_size=4096 "${dtbos[@]}" || return 1
+    echo " dtbo.img: $dtbo_img ($(stat -c %s "$dtbo_img") bytes, ${#dtbos[@]} entries)"
 }
 
 make_defconfig(){
