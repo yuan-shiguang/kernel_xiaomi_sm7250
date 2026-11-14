@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-#  build.sh - Automic kernel building script for Rosemary Kernel
+#  build.sh - Automatic kernel building script
 #
 #  Copyright (C) 2021-2023, Crepuscular's AOSP WorkGroup
 #  Author: EndCredits <alicization.han@gmail.com>
@@ -11,6 +11,9 @@
 #
 #  Add clang to your PATH before using this script.
 #
+
+# Ensure we run from the kernel source root (script's own directory)
+cd "$(dirname "$0")" || { echo "Failed to cd to script directory"; exit 1; }
 
 ARCH=arm64;
 CC=clang;
@@ -25,26 +28,38 @@ OUT="../out";
 TARGET_KERNEL_FILE=arch/arm64/boot/Image;
 TARGET_KERNEL_DTB=arch/arm64/boot/dtb;
 TARGET_KERNEL_DTBO=arch/arm64/boot/dtbo.img
-TARGET_KERNEL_NAME=Driftwood-Kernel;
+TARGET_KERNEL_NAME=LineageOS-Kernel;
 
 DEFCONFIG_PATH=arch/arm64/configs
 DEFCONFIG_NAME=vendor/picasso_user_defconfig;
 DISABLE_KSU_FRAGMENT=vendor/disable_ksu.config;
 
-LOCAL_VERSION_NUMBER=$(cat $DEFCONFIG_PATH/$DEFCONFIG_NAME | grep CONFIG_LOCALVERSION= | cut -d = -f 2 | sed 's/"//g' | sed 's/-Driftwood-//g')
-TARGET_KERNEL_MOD_VERSION=$(make kernelversion)-$LOCAL_VERSION_NUMBER;
+# Extract CONFIG_LOCALVERSION value: anchor to line start, take first match,
+# strip quotes and any surrounding whitespace.
+LOCAL_VERSION_NUMBER=$(grep '^CONFIG_LOCALVERSION=' "$DEFCONFIG_PATH/$DEFCONFIG_NAME" \
+    | head -n 1 \
+    | cut -d = -f 2 \
+    | sed 's/"//g' \
+    | tr -d '[:space:]')
+[ -z "$LOCAL_VERSION_NUMBER" ] && LOCAL_VERSION_NUMBER="unknown"
+TARGET_KERNEL_MOD_VERSION=$(make kernelversion 2>/dev/null)-$LOCAL_VERSION_NUMBER;
 
 START_SEC=$(date +%s);
-CURRENT_TIME=$(date '+%Y-%m%d%H%M');
+CURRENT_TIME=$(date '+%Y%m%d-%H%M');
 
-ANYKERNEL_URL=https://codeload.github.com/EndCredits/AnyKernel3/zip/refs/heads/picasso;
+ANYKERNEL_URL=https://codeload.github.com/yuan-shiguang/AnyKernel3/zip/refs/heads/picasso;
 ANYKERNEL_PATH=AnyKernel3-picasso;
 ANYKERNEL_FILE=anykernel.zip;
 
 WITH_KERNELSU=1
 
 link_all_dtb_files(){
-    find $OUT/arch/arm64/boot/dts/vendor/qcom -name '*.dtb' -exec cat {} + > $OUT/arch/arm64/boot/dtb;
+    local dtb_dir="$OUT/arch/arm64/boot/dts/vendor/qcom"
+    if [ ! -d "$dtb_dir" ]; then
+        echo "Warning: dtb directory $dtb_dir not found, skipping dtb link"
+        return 1
+    fi
+    find "$dtb_dir" -name '*.dtb' -exec cat {} + > "$OUT/arch/arm64/boot/dtb"
 }
 
 pack_dtbo_img(){
@@ -52,12 +67,17 @@ pack_dtbo_img(){
     echo " Packing dtbo.img ............";
     echo "------------------------------";
 
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Error: python3 not found, cannot pack dtbo.img"
+        return 1
+    fi
+
     python3 scripts/mkdtboimg.py create \
-        --dtbo-dir $OUT/arch/arm64/boot/dts/vendor/qcom \
+        --dtbo-dir "$OUT/arch/arm64/boot/dts/vendor/qcom" \
         --dts-dir arch/arm64/boot/dts/vendor/qcom \
         --makefile arch/arm64/boot/dts/vendor/qcom/Makefile \
         --platform LITO \
-        --out $OUT/arch/arm64/boot/dtbo.img;
+        --out "$OUT/arch/arm64/boot/dtbo.img";
 }
 
 make_defconfig(){
@@ -65,7 +85,7 @@ make_defconfig(){
     echo " Building Kernel Defconfig..";
     echo "------------------------------";
 
-    if [ $WITH_KERNELSU == 0 ]; then
+    if [ "$WITH_KERNELSU" = "0" ]; then
         DEFCONFIG_NAME="$DEFCONFIG_NAME $DISABLE_KSU_FRAGMENT"
     fi
 
@@ -79,8 +99,8 @@ build_kernel(){
 
     make CC=$CC ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_COMPAT=$CROSS_COMPILE_COMPAT CLANG_TRIPLE=$CLANG_TRIPLE LLVM=1 LLVM_IAS=1 $CC_ADDITION_FLAGS O=$OUT -j$THREAD;
     END_SEC=$(date +%s);
-    COST_SEC=$[ $END_SEC-$START_SEC ];
-    echo "Kernel Build Costed $(($COST_SEC/60))min $(($COST_SEC%60))s"
+    COST_SEC=$(( END_SEC - START_SEC ));
+    echo "Kernel Build Costed $((COST_SEC/60))min $((COST_SEC%60))s"
 
 }
 
@@ -89,33 +109,38 @@ generate_flashable(){
     echo " Generating Flashable Kernel";
     echo "------------------------------";
 
-    cd $OUT;
+    cd "$OUT" || { echo "Error: cannot cd to $OUT"; return 1; }
     
-    if [ ! -d $ANYKERNEL_PATH ]; then
+    if [ ! -d "$ANYKERNEL_PATH" ]; then
         echo ' Getting AnyKernel ';
-        curl $ANYKERNEL_URL -o $ANYKERNEL_FILE;
-        unzip -o $ANYKERNEL_FILE;
+        curl -fsSL "$ANYKERNEL_URL" -o "$ANYKERNEL_FILE" || { echo "Error: AnyKernel download failed"; return 1; }
+        unzip -o "$ANYKERNEL_FILE" || { echo "Error: unzip failed"; return 1; }
     else
         echo ' Anykernel 3 Detected. Skipping download '
     fi
 
     echo ' Removing old package file ';
-    rm -rf $ANYKERNEL_PATH/$TARGET_KERNEL_NAME*;
+    rm -rf "$ANYKERNEL_PATH/$TARGET_KERNEL_NAME"*;
 
     echo ' Copying Kernel File '; 
-    cp -r $TARGET_KERNEL_FILE $ANYKERNEL_PATH/;
-    cp -r $TARGET_KERNEL_DTB $ANYKERNEL_PATH/;
-    if [ -f $TARGET_KERNEL_DTBO ]; then
-        cp -r $TARGET_KERNEL_DTBO $ANYKERNEL_PATH/;
+    cp -r "$TARGET_KERNEL_FILE" "$ANYKERNEL_PATH/" || return 1;
+    cp -r "$TARGET_KERNEL_DTB" "$ANYKERNEL_PATH/" || return 1;
+    if [ -f "$TARGET_KERNEL_DTBO" ]; then
+        cp -r "$TARGET_KERNEL_DTBO" "$ANYKERNEL_PATH/";
     else
         echo ' Warning: dtbo.img missing, keeping the ROM dtbo partition ';
     fi
 
     echo ' Packaging flashable Kernel ';
-    cd $ANYKERNEL_PATH;
-    zip -q -r $TARGET_KERNEL_NAME-$CURRENT_TIME-$TARGET_KERNEL_MOD_VERSION.zip *;
-
-    echo " Target File:  $OUT/$ANYKERNEL_PATH/$TARGET_KERNEL_NAME-$CURRENT_TIME-$TARGET_KERNEL_MOD_VERSION.zip ";
+    cd "$ANYKERNEL_PATH" || return 1;
+    local zip_name="$TARGET_KERNEL_NAME-$CURRENT_TIME-$TARGET_KERNEL_MOD_VERSION.zip"
+    zip -q -r "$zip_name" ./*;
+    if [ -f "$zip_name" ]; then
+        echo " Target File:  $OUT/$ANYKERNEL_PATH/$zip_name ";
+    else
+        echo "Error: zip creation failed (is 'zip' installed?)"
+        return 1
+    fi
 }
 
 save_defconfig(){
@@ -125,81 +150,85 @@ save_defconfig(){
 
     make CC=$CC ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_COMPAT=$CROSS_COMPILE_COMPAT CLANG_TRIPLE=$CLANG_TRIPLE $CC_ADDITION_FLAGS O=$OUT -j$THREAD savedefconfig;
     END_SEC=$(date +%s);
-    COST_SEC=$[ $END_SEC-$START_SEC ];
+    COST_SEC=$(( END_SEC - START_SEC ));
     echo "Finished. Kernel config saved to $OUT/defconfig"
     echo "Moving kernel defconfig to source tree"
-    mv $OUT/defconfig $DEFCONFIG_PATH/$DEFCONFIG_NAME
-    echo "Kernel Config Build Costed $(($COST_SEC/60))min $(($COST_SEC%60))s"
+    mkdir -p "$DEFCONFIG_PATH/$DEFCONFIG_NAME" 2>/dev/null
+    mkdir -p "$(dirname "$DEFCONFIG_PATH/$DEFCONFIG_NAME")"
+    mv "$OUT/defconfig" "$DEFCONFIG_PATH/$DEFCONFIG_NAME"
+    echo "Kernel Config Build Costed $((COST_SEC/60))min $((COST_SEC%60))s"
 
 }
 
 clean(){
     echo "Clean source tree and build files..."
+    # mrproper already implies clean
     make mrproper -j$THREAD;
-    make clean -j$THREAD;
-    rm -rf $OUT;
+    rm -rf "$OUT";
 }
 
 main(){
-    if [[ $2 == "noksu" ]]; then
+    if [ "${2:-}" = "noksu" ]; then
         echo "Building without Kernel SU"
         WITH_KERNELSU=0
     fi
-    if [ $1 == "help" -o $1 == "-h" ]
-    then
-        echo "build.sh: A very simple Kernel build helper"
-        echo "usage: build.sh <operation> <optional argument>"
-        echo
-        echo "Build operations:"
-        echo "    all             Perform a build without cleaning."
-        echo "    cleanbuild      Clean the source tree and build files then perform a all build."
-        echo
-        echo "    flashable       Only generate the flashable zip file. Don't use it before you have built once."
-        echo "    savedefconfig   Save the defconfig file to source tree."
-        echo "    defconfig       Only build kernel defconfig"
-        echo "    help ( -h )     Print help information."
-        echo "    version         Display the version number."
-        echo
-        echo "Optional argument"
-        echo "    noksu           Build without Kernel SU (with \"all\" and \"defconfig\" operation)"
-        echo
-    elif [ $1 == "savedefconfig" ]
-    then
-        save_defconfig;
-    elif [ $1 == "cleanbuild" ]
-    then
-        clean;
-        make_defconfig;
-        build_kernel;
-        link_all_dtb_files;
-        pack_dtbo_img;
-        generate_flashable;
-    elif [ $1 == "flashable" ]
-    then
-        pack_dtbo_img;
-        generate_flashable;
-    elif [ $1 == "kernelonly" ]
-    then
-        make_defconfig
-        build_kernel
-    elif [ $1 == "all" ]
-    then
-        make_defconfig
-        build_kernel
-        link_all_dtb_files
-        pack_dtbo_img
-        generate_flashable
-    elif [ $1 == "defconfig" ]
-    then
-        make_defconfig;
-    elif [ $1 == "version" ] 
-    then 
-        echo "Current version is: $LOCAL_VERSION_NUMBER"
-    else
-        echo "Incorrect usage. Please run: "
-        echo "  bash build.sh help (or -h) "
-        echo "to display help message."
-    fi
+    case "${1:-}" in
+        help|-h)
+            echo "build.sh: A very simple Kernel build helper"
+            echo "usage: build.sh <operation> <optional argument>"
+            echo
+            echo "Build operations:"
+            echo "    all             Perform a build without cleaning."
+            echo "    cleanbuild      Clean the source tree and build files then perform a all build."
+            echo
+            echo "    flashable       Only generate the flashable zip file. Don't use it before you have built once."
+            echo "    savedefconfig   Save the defconfig file to source tree."
+            echo "    defconfig       Only build kernel defconfig"
+            echo "    help ( -h )     Print help information."
+            echo "    version         Display the version number."
+            echo
+            echo "Optional argument"
+            echo "    noksu           Build without Kernel SU (with \"all\" and \"defconfig\" operation)"
+            echo
+            ;;
+        savedefconfig)
+            save_defconfig;
+            ;;
+        cleanbuild)
+            clean;
+            make_defconfig;
+            build_kernel;
+            link_all_dtb_files;
+            pack_dtbo_img;
+            generate_flashable;
+            ;;
+        flashable)
+            pack_dtbo_img;
+            generate_flashable;
+            ;;
+        kernelonly)
+            make_defconfig
+            build_kernel
+            ;;
+        all)
+            make_defconfig
+            build_kernel
+            link_all_dtb_files
+            pack_dtbo_img
+            generate_flashable
+            ;;
+        defconfig)
+            make_defconfig;
+            ;;
+        version)
+            echo "Current version is: $LOCAL_VERSION_NUMBER"
+            ;;
+        *)
+            echo "Incorrect usage. Please run: "
+            echo "  bash build.sh help (or -h) "
+            echo "to display help message."
+            ;;
+    esac
 }
 
 main "$1" "$2";

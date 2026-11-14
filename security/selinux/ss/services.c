@@ -69,6 +69,16 @@
 #include "ebitmap.h"
 #include "audit.h"
 
+#ifdef CONFIG_KSU_SUSFS
+/*
+ * SuSFS v2.4.0: hide SELinux types injected by KernelSU and restore the
+ * original avc "allowed" mask. Both symbols are defined in fs/susfs.c.
+ */
+extern bool susfs_is_sus_type_rcu(u32 type_value);
+extern void susfs_spoof_avd_allowed_rcu(u32 s_type, u32 t_type, u32 c_type,
+					u32 *avd_allowed);
+#endif // #ifdef CONFIG_KSU_SUSFS
+
 /* Policy capability names */
 const char *selinux_policycap_names[__POLICYDB_CAPABILITY_MAX] = {
 	"network_peer_controls",
@@ -3767,3 +3777,207 @@ int security_read_policy(struct selinux_state *state,
 	return 0;
 
 }
+
+
+/* ------------------------------------------------------------------------- */
+/* SuSFS v2.4.0 - SELinux policy hiding (4.19 adaptation)                      */
+/*                                                                           */
+/* Mirrors the helpers from official gki-android16-6.12-dev services.c, but   */
+/* uses the 4.19 selinux_state / policydb / sidtab API. These are ADDITIVE    */
+/* helpers: no existing SELinux decision path is modified.                    */
+/* ------------------------------------------------------------------------- */
+#ifdef CONFIG_KSU_SUSFS
+
+/*
+ * Same as string_to_context_struct(), but a context whose type was injected
+ * by KernelSU (SUS_TYPE_HLIST) is reported as invalid instead of being
+ * resolved to a SID.
+ */
+static int susfs_string_to_context_struct(struct policydb *pol,
+					  struct sidtab *sidtabp,
+					  char *scontext,
+					  struct context *ctx,
+					  u32 def_sid)
+{
+	struct role_datum *role;
+	struct type_datum *typdatum;
+	struct user_datum *usrdatum;
+	char *scontextp, *p, oldc;
+	int rc = 0;
+
+	context_init(ctx);
+
+	rc = -EINVAL;
+	scontextp = (char *)scontext;
+
+	/* Extract the user. */
+	p = scontextp;
+	while (*p && *p != ':')
+		p++;
+	if (*p == 0)
+		goto out;
+	*p++ = 0;
+
+	usrdatum = hashtab_search(pol->p_users.table, scontextp);
+	if (!usrdatum)
+		goto out;
+	ctx->user = usrdatum->value;
+
+	/* Extract role. */
+	scontextp = p;
+	while (*p && *p != ':')
+		p++;
+	if (*p == 0)
+		goto out;
+	*p++ = 0;
+
+	role = hashtab_search(pol->p_roles.table, scontextp);
+	if (!role)
+		goto out;
+	ctx->role = role->value;
+
+	/* Extract type. */
+	scontextp = p;
+	while (*p && *p != ':')
+		p++;
+	oldc = *p;
+	*p++ = 0;
+
+	typdatum = hashtab_search(pol->p_types.table, scontextp);
+	if (!typdatum || typdatum->attribute)
+		goto out;
+
+	/* v2.4.0: KernelSU-injected types must not be resolvable. */
+	if (likely(susfs_is_sus_type_rcu(typdatum->value)))
+		goto out;
+
+	ctx->type = typdatum->value;
+
+	rc = mls_context_to_sid(pol, oldc, p, ctx, sidtabp, def_sid);
+	if (rc)
+		goto out;
+
+	rc = -EINVAL;
+	if (!policydb_context_isvalid(pol, ctx))
+		goto out;
+	rc = 0;
+out:
+	if (rc)
+		context_destroy(ctx);
+	return rc;
+}
+
+static int susfs_security_context_to_sid_core(struct selinux_state *state,
+					      const char *scontext,
+					      u32 scontext_len, u32 *sid,
+					      u32 def_sid, gfp_t gfp_flags)
+{
+	struct policydb *policydb;
+	struct sidtab *sidtab;
+	char *scontext2;
+	struct context context;
+	int rc = 0;
+
+	if (!scontext_len)
+		return -EINVAL;
+
+	scontext2 = kmemdup_nul(scontext, scontext_len, gfp_flags);
+	if (!scontext2)
+		return -ENOMEM;
+
+	if (!selinux_initialized(state)) {
+		int i;
+
+		for (i = 1; i < SECINITSID_NUM; i++) {
+			if (!strcmp(initial_sid_to_string[i], scontext2)) {
+				*sid = i;
+				goto out;
+			}
+		}
+		*sid = SECINITSID_KERNEL;
+		goto out;
+	}
+	*sid = SECSID_NULL;
+
+	read_lock(&state->ss->policy_rwlock);
+	policydb = &state->ss->policydb;
+	sidtab = state->ss->sidtab;
+	rc = susfs_string_to_context_struct(policydb, sidtab, scontext2,
+					    &context, def_sid);
+	if (rc)
+		goto out_unlock;
+	rc = context_struct_to_sid(state, &context, sid);
+	context_destroy(&context);
+out_unlock:
+	read_unlock(&state->ss->policy_rwlock);
+out:
+	kfree(scontext2);
+	return rc;
+}
+
+int susfs_security_context_to_sid(const char *scontext, u32 scontext_len,
+				  u32 *sid, gfp_t gfp)
+{
+	return susfs_security_context_to_sid_core(&selinux_state, scontext,
+						  scontext_len, sid,
+						  SECSID_NULL, gfp);
+}
+
+int susfs_security_context_str_to_sid(const char *scontext, u32 *sid, gfp_t gfp)
+{
+	return susfs_security_context_to_sid(scontext, strlen(scontext), sid, gfp);
+}
+
+/*
+ * Same as security_compute_av_user(), but restores the "allowed" mask that
+ * was in effect before KernelSU injected its sepolicy rules.
+ */
+void susfs_security_compute_av_user(u32 ssid, u32 tsid, u16 tclass,
+				    struct av_decision *avd)
+{
+	struct selinux_state *state = &selinux_state;
+	struct policydb *policydb;
+	struct sidtab *sidtab;
+	struct context *scontext = NULL, *tcontext = NULL;
+
+	read_lock(&state->ss->policy_rwlock);
+	avd_init(state, avd);
+	if (!selinux_initialized(state))
+		goto allow;
+
+	policydb = &state->ss->policydb;
+	sidtab = state->ss->sidtab;
+
+	scontext = sidtab_search(sidtab, ssid);
+	if (!scontext) {
+		pr_err("SELinux: %s:  unrecognized SID %d\n", __func__, ssid);
+		goto out;
+	}
+
+	if (ebitmap_get_bit(&policydb->permissive_map, scontext->type))
+		avd->flags |= AVD_FLAGS_PERMISSIVE;
+
+	tcontext = sidtab_search(sidtab, tsid);
+	if (!tcontext) {
+		pr_err("SELinux: %s:  unrecognized SID %d\n", __func__, tsid);
+		goto out;
+	}
+
+	if (unlikely(!tclass)) {
+		if (policydb->allow_unknown)
+			goto allow;
+		goto out;
+	}
+
+	context_struct_compute_av(policydb, scontext, tcontext, tclass, avd,
+				  NULL);
+	susfs_spoof_avd_allowed_rcu(scontext->type, tcontext->type, tclass,
+				    &avd->allowed);
+out:
+	read_unlock(&state->ss->policy_rwlock);
+	return;
+allow:
+	avd->allowed = 0xffffffff;
+	goto out;
+}
+#endif // #ifdef CONFIG_KSU_SUSFS
