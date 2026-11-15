@@ -134,3 +134,8 @@ all.config
 
 # fetched Android config fragments
 kernel/configs/android-*.cfg
+
+# Local VINTF compatibility-matrix reference (ROM framework data, not kernel
+# source). Kept on disk only for deriving kernel config overrides; never
+# committed or pushed.
+/vintf/

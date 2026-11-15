@@ -103,7 +103,8 @@ CONFIG_PANIC_ON_REFCOUNT_ERROR=y
 CONFIG_MODULES=y
 CONFIG_MODULE_FORCE_LOAD=y
 CONFIG_MODULE_UNLOAD=y
-CONFIG_MODULE_FORCE_UNLOAD=y
+# VINTF: framework compatibility matrix requires module force-unload disabled
+CONFIG_MODULE_FORCE_UNLOAD=n
 CONFIG_MODVERSIONS=y
 CONFIG_MODULE_SIG=y
 # CONFIG_BLK_DEV_BSG is not set
@@ -735,3 +736,15 @@ CONFIG_EROFS_FS_POSIX_ACL=y
 CONFIG_EROFS_FS_SECURITY=y
 CONFIG_EROFS_FS_ZIP=y
 CONFIG_EROFS_FS_PCPU_KTHREAD_HIPRI=y
+
+# VINTF: framework compatibility matrix (vintf/compatibility_matrix.*.xml, 4.19
+# blocks) requires these CONFIGs enabled. If unset, Android VINTF validation
+# fails and the device shows "您的设备内部出现了问题。请联系您的设备制造商了解详情".
+# (inspired by cctv18 coolapk #66267336)
+CONFIG_ARM64_SW_TTBR0_PAN=y
+CONFIG_CRYPTO_CHACHA20POLY1305=y
+CONFIG_DEBUG_LIST=y
+CONFIG_DM_SNAPSHOT=y
+CONFIG_SONY_FF=y
+CONFIG_TRACE_GPU_MEM=y
+CONFIG_XFRM_MIGRATE=y

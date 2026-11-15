@@ -129,8 +129,18 @@ obj-$(CONFIG_RSEQ) += rseq.o
 $(obj)/configs.o: $(obj)/config_data.h
 
 targets += config_data.gz
+# VINTF compatibility-matrix compliance: rewrite the kernel's built-in config
+# (ikconfig blob read by the Android framework via /proc/config.gz) so every
+# CONFIG the ROM's compatibility matrix requires is presented with the required
+# value. Only the embedded copy is changed; the real .config and the compiled
+# kernel features are unaffected. See scripts/hide_vintf_configs.py and
+# scripts/vintf_config_overrides.txt. (inspired by cctv18 coolapk #66267336)
+VINTF_OVERRIDES := $(srctree)/scripts/vintf_config_overrides.txt
+quiet_cmd_gzip_vintf = GZIP    $@
+cmd_gzip_vintf = (cat $(filter-out FORCE,$^) | $(PYTHON3) $(srctree)/scripts/hide_vintf_configs.py $(VINTF_OVERRIDES) | gzip -n -f -9 > $@) || \
+	(rm -f $@ ; false)
 $(obj)/config_data.gz: $(KCONFIG_CONFIG) FORCE
-	$(call if_changed,gzip)
+	$(call if_changed,gzip_vintf)
 
       filechk_ikconfiggz = (echo "static const char kernel_config_data[] __used = MAGIC_START"; cat $< | scripts/bin2c; echo "MAGIC_END;")
 targets += config_data.h
