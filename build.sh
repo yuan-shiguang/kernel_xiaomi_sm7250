@@ -41,8 +41,10 @@ LOCAL_VERSION_NUMBER=$(grep '^CONFIG_LOCALVERSION=' "$DEFCONFIG_PATH/$DEFCONFIG_
     | cut -d = -f 2 \
     | sed 's/"//g' \
     | tr -d '[:space:]')
-[ -z "$LOCAL_VERSION_NUMBER" ] && LOCAL_VERSION_NUMBER="unknown"
-TARGET_KERNEL_MOD_VERSION=$(make kernelversion 2>/dev/null)-$LOCAL_VERSION_NUMBER;
+# If CONFIG_LOCALVERSION is unset, LOCAL_VERSION_NUMBER stays empty and the
+# version string is exactly what `make kernelversion` reports (e.g. 4.19.325).
+# If set (e.g. "-cip124-st8"), it is concatenated directly: 4.19.325-cip124-st8.
+TARGET_KERNEL_MOD_VERSION="$(make kernelversion 2>/dev/null)${LOCAL_VERSION_NUMBER}"
 
 START_SEC=$(date +%s);
 CURRENT_TIME=$(date '+%Y%m%d-%H%M');
