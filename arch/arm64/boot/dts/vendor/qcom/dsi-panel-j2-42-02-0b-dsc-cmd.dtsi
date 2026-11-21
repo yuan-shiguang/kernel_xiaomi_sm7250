@@ -23,8 +23,8 @@
 		qcom,mdss-dsi-dma-trigger = "trigger_sw";
 		qcom,mdss-dsi-mdp-trigger = "none";
 		qcom,mdss-dsi-reset-sequence = <1 1>, <0 1>, <1 10>;
-		qcom,mdss-pan-physical-width-dimension = <710>;
-		qcom,mdss-pan-physical-height-dimension = <1537>;
+		qcom,mdss-pan-physical-width-dimension = <71>;
+		qcom,mdss-pan-physical-height-dimension = <154>;
 		qcom,mdss-dsi-te-pin-select = <1>;
 		qcom,mdss-dsi-wr-mem-start = <0x2c>;
 		qcom,mdss-dsi-wr-mem-continue = <0x3c>;
@@ -286,7 +286,7 @@
 	mi,mdss-dsi-white-point-info-length = <8>;
 	mi,mdss-dsi-panel-dc-type = <0>;
 
-	mi,mdss-panel-on-dimming-delay = <0>;
+	mi,mdss-panel-on-dimming-delay = <120>;
 
 	mi,mdss-dsi-panel-fod-dimlayer-enabled;
 	mi,mdss-panel-delay-before-fod-hbm-on;
@@ -363,8 +363,7 @@
 				/* Dimming Off */
 				15 00 00 00 00 00 02 53 20
 				/* HBM Mode */
-				39 01 00 00 00 00 03 51 0F FF
-				39 01 00 00 00 00 03 51 05 21];
+				39 01 00 00 00 00 03 51 0F FF];
 			mi,mdss-dsi-hbm-fod-off-command = [
 				/* Dimming Off */
 				15 01 00 00 00 00 02 53 20
@@ -457,8 +456,7 @@
 				/* Dimming Off */
 				15 00 00 00 00 00 02 53 20
 				/* HBM Mode */
-				39 01 00 00 00 00 03 51 0F FF
-				39 01 00 00 00 00 03 51 05 21];
+				39 01 00 00 00 00 03 51 0F FF];
 			mi,mdss-dsi-hbm-fod-off-command = [
 				/* Dimming Off */
 				15 01 00 00 00 00 02 53 20

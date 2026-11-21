@@ -23,8 +23,8 @@
 		qcom,mdss-dsi-dma-trigger = "trigger_sw";
 		qcom,mdss-dsi-mdp-trigger = "none";
 		qcom,mdss-dsi-reset-sequence = <0 1>, <1 6>;
-		qcom,mdss-pan-physical-width-dimension = <710>;
-		qcom,mdss-pan-physical-height-dimension = <1537>;
+		qcom,mdss-pan-physical-width-dimension = <71>;
+		qcom,mdss-pan-physical-height-dimension = <154>;
 		qcom,mdss-dsi-te-pin-select = <1>;
 		qcom,mdss-dsi-wr-mem-start = <0x2c>;
 		qcom,mdss-dsi-wr-mem-continue = <0x3c>;
@@ -407,7 +407,7 @@
 	mi,mdss-dsi-panel-dc-threshold = <440>;
 	mi,mdss-dsi-panel-dc-type = <1>;
 
-	mi,mdss-panel-on-dimming-delay = <0>;
+	mi,mdss-panel-on-dimming-delay = <120>;
 
 	mi,mdss-dsi-panel-fod-dimlayer-enabled;
 	mi,mdss-panel-delay-before-fod-hbm-on;
@@ -522,7 +522,6 @@
 				/* HBM mode On */
 				15 01 00 00 11 00 02 53 E0
 				39 00 00 00 00 00 03 51 0D FF
-				39 01 00 00 00 00 03 51 05 21		
 				/* HBM mode setting */
 				39 00 00 00 00 00 03 F0 5A 5A
 				39 00 00 00 00 00 02 C7 27
