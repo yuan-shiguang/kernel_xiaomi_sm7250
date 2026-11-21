@@ -9,11 +9,10 @@
 &qupv3_se11_spi {
 	status = "ok";
 	irled@0 {
-		compatible = "ir-spi-led";
+		compatible = "ir-spi";
 		reg = <0x0>;
 		status = "ok";
 		spi-max-frequency = <19200000>;
-		power-supply = <&irda_regulator>;
 	};
 };
 
@@ -322,6 +321,7 @@
 	qcom,shutdown-soc-threshold = <3>;
 	qcom,tcss-enable;
 	qcom,shutdown-delay-enable;
+	qcom,bass-enable;
 };
 
 &smb1396 {
@@ -349,11 +349,6 @@
         };
 	thermal_message: thermal-message {
 		board-sensor = "VIRTUAL-SENSOR";
-	};
-
-	irda_regulator: irda-regulator {
-		compatible = "regulator-dummy";
-		regulator-name = "irda_regulator";
 	};
 
 	simtray {
@@ -395,7 +390,6 @@
 		focaltech,irq-gpio = <&tlmm 5 0x02>;
 		focaltech,max-touch-number = <10>;
 		focaltech,display-coords = <0 0 1080 2400>;
-		focaltech,reset-when-resume;
 		focaltech,lockdown-info-addr = <0x1E000>;
 		focaltech,open-min = <2700>;
 		pinctrl-names = "pmx_tp_active", "pmx_tp_suspend";
